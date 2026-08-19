@@ -4,70 +4,39 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        'orbitron': ['Orbitron', 'monospace'],
-        'inter': ['Inter', 'sans-serif'],
+        display: ['"Inter Tight"', 'Inter', 'sans-serif'],
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
       },
       colors: {
-        'space': {
-          900: '#0a0a0f',
-          800: '#0f0f1a',
-          700: '#1a1a2e',
+        hull: {
+          950: '#06070a',
+          900: '#0a0c10',
+          800: '#111419',
+          700: '#191d24',
+          600: '#242932',
         },
-        'neon': {
-          blue: '#00d4ff',
-          cyan: '#00ffff',
-          green: '#00ff88',
-          purple: '#8b5cf6',
+        ice: {
+          DEFAULT: '#84b6d6',
+          dim: '#4d7891',
+          bright: '#b9dcf0',
         },
-        'glass': {
-          light: 'rgba(255, 255, 255, 0.1)',
-          medium: 'rgba(255, 255, 255, 0.2)',
-          dark: 'rgba(0, 0, 0, 0.3)',
+        signal: {
+          ok: '#6fbf8f',
+          warn: '#d3a04e',
+          alert: '#d1614e',
+          idle: '#63707d',
         },
-        'cyber': {
-          blue: '#00d4ff',
-          cyan: '#00ffff',
-          purple: '#8b5cf6',
-          green: '#00ff88',
-        }
       },
-      animation: {
-        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'float': 'float 6s ease-in-out infinite',
-        'rotate-slow': 'rotate 20s linear infinite',
-        'glow': 'glow 2s ease-in-out infinite alternate',
-        'grid-move': 'grid-move 20s linear infinite',
-        'float-particle': 'float-particle linear infinite',
+      fontSize: {
+        '2xs': ['0.625rem', { lineHeight: '0.875rem' }],
       },
-      keyframes: {
-        float: {
-          '0%, 100%': { transform: 'translateY(0px)' },
-          '50%': { transform: 'translateY(-20px)' },
-        },
-        glow: {
-          '0%': { boxShadow: '0 0 20px rgba(0, 212, 255, 0.5)' },
-          '100%': { boxShadow: '0 0 40px rgba(0, 212, 255, 0.8)' },
-        },
-        'grid-move': {
-          '0%': { transform: 'translate(0, 0)' },
-          '100%': { transform: 'translate(50px, 50px)' },
-        },
-        'float-particle': {
-          '0%': { 
-            transform: 'translateY(100vh) translateX(0px)',
-            opacity: '0'
-          },
-          '10%': { opacity: '1' },
-          '90%': { opacity: '1' },
-          '100%': { 
-            transform: 'translateY(-100px) translateX(50px)',
-            opacity: '0'
-          },
-        }
+      letterSpacing: {
+        hud: '0.18em',
       },
-      backdropBlur: {
-        xs: '2px',
-      }
+      transitionTimingFunction: {
+        instrument: 'cubic-bezier(0.16, 1, 0.3, 1)',
+      },
     },
   },
   plugins: [],

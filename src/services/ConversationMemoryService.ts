@@ -1,3 +1,11 @@
+export interface ConversationTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** Shape of a persisted record before its date strings are revived. */
+type StoredEntry = Omit<ConversationEntry, 'timestamp'> & { timestamp: string };
+
 export interface ConversationEntry {
   id: string;
   userMessage: string;
@@ -7,7 +15,7 @@ export interface ConversationEntry {
   userId: string;
   deviceId: string;
   context?: {
-    userPreferences?: Record<string, any>;
+    userPreferences?: Record<string, unknown>;
     topics?: string[];
     mood?: 'formal' | 'casual' | 'technical' | 'friendly';
     importance?: 'low' | 'medium' | 'high';
@@ -37,7 +45,7 @@ export interface UserProfile {
     devicesUsed: string[];
   };
   createdAt: Date;
-  lastSyncedAt: Date;
+  lastSavedAt: Date;
 }
 
 export interface DeviceInfo {
@@ -53,7 +61,6 @@ export class ConversationMemoryService {
   private static readonly USER_PROFILE_KEY = 'jarvis_user_profile';
   private static readonly USER_ID_KEY = 'jarvis_user_id';
   private static readonly DEVICE_ID_KEY = 'jarvis_device_id';
-  private static readonly SESSION_KEY = 'jarvis_session_id';
   private static readonly MAX_STORED_CONVERSATIONS = 1000;
   private static readonly CONTEXT_WINDOW_SIZE = 20;
 
@@ -61,18 +68,15 @@ export class ConversationMemoryService {
   private currentUserId: string;
   private currentDeviceId: string;
   private conversationHistory: ConversationEntry[] = [];
-  private userProfile: UserProfile;
-  private isOnline: boolean = navigator.onLine;
+  private userProfile!: UserProfile;
 
   constructor() {
     this.currentSessionId = this.generateSessionId();
     this.currentUserId = this.getOrCreateUserId();
     this.currentDeviceId = this.getOrCreateDeviceId();
     
-    this.setupOnlineStatusListener();
     this.loadConversationHistory();
     this.loadUserProfile();
-    this.syncWithCloud();
   }
 
   private generateSessionId(): string {
@@ -134,115 +138,14 @@ export class ConversationMemoryService {
     };
   }
 
-  private setupOnlineStatusListener(): void {
-    window.addEventListener('online', () => {
-      this.isOnline = true;
-      this.syncWithCloud();
-    });
-
-    window.addEventListener('offline', () => {
-      this.isOnline = false;
-    });
-  }
-
-  private async syncWithCloud(): Promise<void> {
-    if (!this.isOnline) return;
-
-    try {
-      // In a real implementation, this would sync with a cloud service
-      // For now, we'll simulate cloud sync with enhanced localStorage
-      await this.simulateCloudSync();
-    } catch (error) {
-      console.error('Cloud sync failed:', error);
-    }
-  }
-
-  private async simulateCloudSync(): Promise<void> {
-    // Simulate cloud storage using localStorage with user-specific keys
-    const cloudKey = `jarvis_cloud_${this.currentUserId}`;
-    const cloudData = localStorage.getItem(cloudKey);
-    
-    if (cloudData) {
-      try {
-        const parsed = JSON.parse(cloudData);
-        
-        // Merge cloud data with local data
-        if (parsed.conversations && Array.isArray(parsed.conversations)) {
-          const cloudConversations = parsed.conversations.map((conv: any) => ({
-            ...conv,
-            timestamp: new Date(conv.timestamp)
-          }));
-          
-          // Merge conversations, avoiding duplicates
-          const mergedConversations = this.mergeConversations(this.conversationHistory, cloudConversations);
-          this.conversationHistory = mergedConversations;
-        }
-        
-        if (parsed.userProfile) {
-          this.userProfile = {
-            ...parsed.userProfile,
-            conversationStats: {
-              ...parsed.userProfile.conversationStats,
-              lastActiveDate: new Date(parsed.userProfile.conversationStats.lastActiveDate)
-            },
-            createdAt: new Date(parsed.userProfile.createdAt),
-            lastSyncedAt: new Date(parsed.userProfile.lastSyncedAt)
-          };
-        }
-      } catch (error) {
-        console.error('Error parsing cloud data:', error);
-      }
-    }
-    
-    // Update cloud with current data
-    this.saveToCloud();
-  }
-
-  private mergeConversations(local: ConversationEntry[], cloud: ConversationEntry[]): ConversationEntry[] {
-    const merged = [...local];
-    const localIds = new Set(local.map(conv => conv.id));
-    
-    // Add cloud conversations that aren't in local storage
-    cloud.forEach(cloudConv => {
-      if (!localIds.has(cloudConv.id)) {
-        merged.push(cloudConv);
-      }
-    });
-    
-    // Sort by timestamp and limit to max conversations
-    return merged
-      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-      .slice(-ConversationMemoryService.MAX_STORED_CONVERSATIONS);
-  }
-
-  private async saveToCloud(): Promise<void> {
-    if (!this.isOnline) return;
-
-    try {
-      const cloudKey = `jarvis_cloud_${this.currentUserId}`;
-      const cloudData = {
-        conversations: this.conversationHistory,
-        userProfile: {
-          ...this.userProfile,
-          lastSyncedAt: new Date()
-        },
-        lastUpdated: new Date()
-      };
-      
-      localStorage.setItem(cloudKey, JSON.stringify(cloudData));
-    } catch (error) {
-      console.error('Error saving to cloud:', error);
-    }
-  }
-
   private loadConversationHistory(): void {
     try {
       const stored = localStorage.getItem(ConversationMemoryService.STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         this.conversationHistory = parsed
-          .filter((entry: any) => entry.userId === this.currentUserId)
-          .map((entry: any) => ({
+          .filter((entry: StoredEntry) => entry.userId === this.currentUserId)
+          .map((entry: StoredEntry) => ({
             ...entry,
             timestamp: new Date(entry.timestamp)
           }));
@@ -266,7 +169,7 @@ export class ConversationMemoryService {
               lastActiveDate: new Date(parsed.conversationStats.lastActiveDate)
             },
             createdAt: new Date(parsed.createdAt),
-            lastSyncedAt: new Date(parsed.lastSyncedAt || Date.now())
+            lastSavedAt: new Date(parsed.lastSavedAt || Date.now())
           };
         } else {
           this.initializeUserProfile();
@@ -293,7 +196,7 @@ export class ConversationMemoryService {
         devicesUsed: [this.currentDeviceId]
       },
       createdAt: new Date(),
-      lastSyncedAt: new Date()
+      lastSavedAt: new Date()
     };
   }
 
@@ -308,9 +211,6 @@ export class ConversationMemoryService {
         ConversationMemoryService.STORAGE_KEY, 
         JSON.stringify(updatedConversations.slice(-ConversationMemoryService.MAX_STORED_CONVERSATIONS))
       );
-      
-      // Also save to cloud
-      this.saveToCloud();
     } catch (error) {
       console.error('Error saving conversation history:', error);
     }
@@ -320,7 +220,7 @@ export class ConversationMemoryService {
     try {
       const stored = localStorage.getItem(ConversationMemoryService.STORAGE_KEY);
       if (stored) {
-        return JSON.parse(stored).map((entry: any) => ({
+        return (JSON.parse(stored) as StoredEntry[]).map((entry) => ({
           ...entry,
           timestamp: new Date(entry.timestamp)
         }));
@@ -338,15 +238,12 @@ export class ConversationMemoryService {
         this.userProfile.conversationStats.devicesUsed.push(this.currentDeviceId);
       }
       
-      this.userProfile.lastSyncedAt = new Date();
+      this.userProfile.lastSavedAt = new Date();
       
       localStorage.setItem(
         ConversationMemoryService.USER_PROFILE_KEY,
         JSON.stringify(this.userProfile)
       );
-      
-      // Also save to cloud
-      this.saveToCloud();
     } catch (error) {
       console.error('Error saving user profile:', error);
     }
@@ -384,7 +281,12 @@ export class ConversationMemoryService {
     });
 
     // Update preferences based on context
-    if (context?.mood && !this.userProfile.preferences.communicationStyle) {
+    // 'friendly' is a conversation mood but not a stored communication style.
+    if (
+      context?.mood &&
+      context.mood !== 'friendly' &&
+      !this.userProfile.preferences.communicationStyle
+    ) {
       this.userProfile.preferences.communicationStyle = context.mood;
     }
 
@@ -430,8 +332,6 @@ export class ConversationMemoryService {
   }
 
   private extractPersonalInfo(message: string): void {
-    const lowerMessage = message.toLowerCase();
-
     // Extract name
     const nameMatch = message.match(/(?:my name is|i'm|i am|call me)\s+([a-zA-Z]+)/i);
     if (nameMatch && !this.userProfile.name) {
@@ -464,57 +364,41 @@ export class ConversationMemoryService {
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   }
 
-  public getConversationContext(): string {
-    const recentConversations = this.getRecentConversations(10);
-    
-    if (recentConversations.length === 0) {
-      return '';
+  /**
+   * Recent history as alternating conversation turns.
+   *
+   * These are sent as real `messages` rather than summarised into the system
+   * prompt: it keeps the system prefix byte-stable (a prerequisite for prompt
+   * caching) and gives the model a properly structured dialogue instead of a
+   * paraphrase of one.
+   */
+  public getRecentTurns(limit: number = 5): ConversationTurn[] {
+    return this.getRecentConversations(limit).flatMap((conv) => [
+      { role: 'user' as const, content: conv.userMessage },
+      { role: 'assistant' as const, content: conv.jarvisResponse },
+    ]);
+  }
+
+  /** Durable facts about the user, phrased for injection as a single turn. */
+  public getProfileSummary(): string {
+    const parts: string[] = [];
+    const { name, email, personalInfo, preferences } = this.userProfile;
+
+    if (name) parts.push(`Their name is ${name}.`);
+    if (email) parts.push(`Their email is ${email}.`);
+    if (personalInfo.occupation) parts.push(`They work as ${personalInfo.occupation}.`);
+    if (personalInfo.location) parts.push(`They are based in ${personalInfo.location}.`);
+    if (preferences.communicationStyle) {
+      parts.push(`They prefer a ${preferences.communicationStyle} tone.`);
     }
 
-    const contextParts: string[] = [];
-
-    // Add user profile context
-    if (this.userProfile.name) {
-      contextParts.push(`User's name: ${this.userProfile.name}`);
-    }
-
-    if (this.userProfile.email) {
-      contextParts.push(`User's email: ${this.userProfile.email}`);
-    }
-
-    if (this.userProfile.personalInfo.occupation) {
-      contextParts.push(`User's occupation: ${this.userProfile.personalInfo.occupation}`);
-    }
-
-    if (this.userProfile.preferences.communicationStyle) {
-      contextParts.push(`Preferred communication style: ${this.userProfile.preferences.communicationStyle}`);
-    }
-
-    // Add device context
-    const deviceInfo = this.getDeviceInfo();
-    contextParts.push(`Current device: ${deviceInfo.deviceName}`);
-
-    // Add favorite topics
     const topTopics = Object.entries(this.userProfile.conversationStats.favoriteTopics)
-      .sort(([,a], [,b]) => b - a)
+      .sort(([, a], [, b]) => b - a)
       .slice(0, 3)
       .map(([topic]) => topic);
-    
-    if (topTopics.length > 0) {
-      contextParts.push(`User's main interests: ${topTopics.join(', ')}`);
-    }
+    if (topTopics.length > 0) parts.push(`They often talk about ${topTopics.join(', ')}.`);
 
-    // Add recent conversation summary
-    const conversationSummary = recentConversations
-      .slice(-5) // Last 5 conversations
-      .map(conv => `User: "${conv.userMessage}" | JARVIS: "${conv.jarvisResponse.substring(0, 100)}..."`)
-      .join(' | ');
-
-    if (conversationSummary) {
-      contextParts.push(`Recent conversation context: ${conversationSummary}`);
-    }
-
-    return contextParts.join('\n');
+    return parts.join(' ');
   }
 
   public searchConversations(query: string, limit: number = 10): ConversationEntry[] {
@@ -535,8 +419,7 @@ export class ConversationMemoryService {
     favoriteTopics: Array<{ topic: string; count: number }>;
     averageConversationsPerDay: number;
     devicesUsed: number;
-    isOnline: boolean;
-    lastSynced: Date;
+    lastSaved: Date;
   } {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -567,8 +450,7 @@ export class ConversationMemoryService {
       favoriteTopics,
       averageConversationsPerDay,
       devicesUsed: this.userProfile.conversationStats.devicesUsed.length,
-      isOnline: this.isOnline,
-      lastSynced: this.userProfile.lastSyncedAt
+      lastSaved: this.userProfile.lastSavedAt
     };
   }
 
@@ -625,7 +507,7 @@ export class ConversationMemoryService {
     return { ...this.userProfile };
   }
 
-  public updateUserPreference(key: string, value: any): void {
+  public updateUserPreference(key: string, value: string | string[]): void {
     this.userProfile.preferences = {
       ...this.userProfile.preferences,
       [key]: value
@@ -641,7 +523,7 @@ export class ConversationMemoryService {
     return this.currentDeviceId;
   }
 
-  public async switchUser(userId: string): Promise<void> {
+  public switchUser(userId: string): void {
     // Save current user's data
     this.saveConversationHistory();
     this.saveUserProfile();
@@ -653,13 +535,5 @@ export class ConversationMemoryService {
     // Load new user's data
     this.loadConversationHistory();
     this.loadUserProfile();
-    await this.syncWithCloud();
-  }
-
-  public getConnectionStatus(): { isOnline: boolean; lastSynced: Date } {
-    return {
-      isOnline: this.isOnline,
-      lastSynced: this.userProfile.lastSyncedAt
-    };
   }
 }

@@ -6,14 +6,14 @@
   * {
     box-sizing: border-box;
   }
-  
+
   body {
     margin: 0;
     padding: 0;
-    font-family: 'Inter', sans-serif;
-    background: #000000;
+    font-family: 'Inter', system-ui, sans-serif;
+    background: #06070a;
+    color: #dde4ea;
     overflow: hidden;
-    user-select: none;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -24,269 +24,107 @@
 }
 
 @layer components {
-  .glass-panel {
-    @apply bg-black/40 backdrop-blur-md border border-cyan-500/20 rounded-xl;
-    box-shadow: 
-      0 8px 32px rgba(0, 0, 0, 0.8),
-      inset 0 1px 0 rgba(0, 212, 255, 0.2),
-      0 0 20px rgba(0, 212, 255, 0.15);
+  /* Instrument panel: brushed dark glass with a single hairline and a real
+     top-edge highlight, rather than an outer neon halo. */
+  .panel {
+    background: linear-gradient(
+      180deg,
+      rgba(28, 33, 40, 0.72) 0%,
+      rgba(14, 17, 21, 0.78) 100%
+    );
+    border: 1px solid rgba(151, 178, 199, 0.13);
+    border-radius: 6px;
+    backdrop-filter: blur(14px) saturate(120%);
+    box-shadow:
+      inset 0 1px 0 rgba(190, 214, 230, 0.09),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+      0 12px 32px -12px rgba(0, 0, 0, 0.9);
   }
-  
-  .bg-grid-pattern {
-    background-image: 
-      linear-gradient(rgba(0, 212, 255, 0.1) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0, 212, 255, 0.1) 1px, transparent 1px);
-    background-size: 50px 50px;
-    animation: grid-move 20s linear infinite;
-  }
-  
-  .bg-gradient-radial {
-    background: radial-gradient(circle at center, transparent 0%, rgba(0, 0, 0, 0.8) 70%, black 100%);
-  }
-  
-  .floating-particle {
-    position: absolute;
-    background: var(--particle-color, rgba(0, 212, 255, 0.8));
-    border-radius: 50%;
-    animation: float-particle linear infinite;
-    box-shadow: 0 0 6px var(--particle-color, rgba(0, 212, 255, 0.8));
-  }
-  
-  .particle-small {
-    width: 1px;
-    height: 1px;
-  }
-  
-  .particle-medium {
-    width: 2px;
-    height: 2px;
-  }
-  
-  .particle-large {
-    width: 3px;
-    height: 3px;
-    box-shadow: 0 0 10px var(--particle-color, rgba(0, 212, 255, 0.8));
-  }
-  
-  .scanning-line {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.8), transparent);
-    animation: scan-horizontal 8s ease-in-out infinite;
-    box-shadow: 0 0 10px rgba(0, 212, 255, 0.6);
-  }
-  
-  .scanning-line-vertical {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 2px;
-    height: 100%;
-    background: linear-gradient(180deg, transparent, rgba(0, 255, 255, 0.6), transparent);
-    animation: scan-vertical 12s ease-in-out infinite;
-    box-shadow: 0 0 10px rgba(0, 255, 255, 0.4);
-  }
-  
-  .data-stream {
-    position: absolute;
-    top: -10px;
-    width: 1px;
-    height: 20px;
-    background: linear-gradient(180deg, transparent, rgba(0, 212, 255, 0.8), transparent);
-    animation: data-flow linear infinite;
-    box-shadow: 0 0 4px rgba(0, 212, 255, 0.6);
-  }
-  
-  .hud-element {
-    background: rgba(0, 0, 0, 0.6);
-    border: 1px solid rgba(0, 212, 255, 0.3);
+
+  .panel-inset {
+    background: rgba(6, 8, 11, 0.6);
+    border: 1px solid rgba(151, 178, 199, 0.08);
     border-radius: 4px;
-    padding: 4px 8px;
-    backdrop-filter: blur(10px);
-    animation: hud-flicker 3s ease-in-out infinite;
-  }
-  
-  .header-glow {
-    background: radial-gradient(ellipse at center left, rgba(0, 212, 255, 0.3) 0%, rgba(0, 255, 255, 0.15) 40%, transparent 70%);
-    animation: header-pulse 3s ease-in-out infinite;
-    border-radius: 50%;
-    filter: blur(20px);
-  }
-  
-  .subtitle-glow {
-    text-shadow: 
-      0 0 10px rgba(0, 212, 255, 0.8),
-      0 0 20px rgba(0, 212, 255, 0.6),
-      0 0 30px rgba(0, 212, 255, 0.4);
-    animation: subtitle-flicker 4s ease-in-out infinite;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6);
   }
 
-  .neon-glow {
-    filter: drop-shadow(0 0 10px currentColor) drop-shadow(0 0 20px currentColor);
+  /* Etched label text — the small caps used on real instrument faces. */
+  .etch {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.625rem;
+    line-height: 0.875rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(221, 228, 234, 0.42);
   }
 
-  .text-glow {
-    text-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor;
+  .readout {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+    color: rgba(221, 228, 234, 0.9);
   }
 
-  .holographic-text {
-    background: linear-gradient(45deg, #00d4ff, #00ffff, #00ff88, #8b5cf6);
-    background-size: 400% 400%;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    animation: holographic-shift 4s ease-in-out infinite;
+  /* Corner registration marks on the viewport frame. */
+  .frame-corner {
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    border-color: rgba(151, 178, 199, 0.22);
+    border-style: solid;
+    border-width: 0;
   }
 
-  .arc-reactor-glow {
-    box-shadow: 
-      0 0 20px rgba(0, 212, 255, 0.5),
-      0 0 40px rgba(0, 212, 255, 0.3),
-      0 0 60px rgba(0, 212, 255, 0.1),
-      inset 0 0 20px rgba(0, 212, 255, 0.2);
+  /* Backlight behind the reactor — physical bounce light, not a glow filter. */
+  .backlight {
+    background: radial-gradient(
+      circle at 50% 50%,
+      rgba(132, 182, 214, 0.16) 0%,
+      rgba(77, 120, 145, 0.06) 32%,
+      transparent 62%
+    );
   }
 
-  .energy-pulse {
-    animation: energy-pulse 2s ease-in-out infinite;
+  .vignette {
+    background: radial-gradient(
+      ellipse 110% 85% at 50% 45%,
+      transparent 40%,
+      rgba(3, 4, 6, 0.55) 78%,
+      rgba(3, 4, 6, 0.9) 100%
+    );
   }
 
-  @keyframes holographic-shift {
-    0%, 100% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
+  /* Display artifacts: fine scanlines + static grain, both very low contrast.
+     These read as "camera pointed at a screen" rather than as decoration. */
+  .scanlines {
+    background: repeating-linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.018) 0px,
+      rgba(255, 255, 255, 0.018) 1px,
+      transparent 1px,
+      transparent 3px
+    );
   }
 
-  @keyframes energy-pulse {
-    0%, 100% { 
-      box-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
-      transform: scale(1);
-    }
-    50% { 
-      box-shadow: 0 0 40px rgba(0, 212, 255, 0.8);
-      transform: scale(1.02);
-    }
-  }
-  
-  @keyframes scan-horizontal {
-    0%, 100% { 
-      transform: translateY(0vh);
-      opacity: 0;
-    }
-    10% { opacity: 1; }
-    50% { 
-      transform: translateY(50vh);
-      opacity: 0.8;
-    }
-    90% { opacity: 1; }
-    100% { 
-      transform: translateY(100vh);
-      opacity: 0;
-    }
-  }
-  
-  @keyframes scan-vertical {
-    0%, 100% { 
-      transform: translateX(0vw);
-      opacity: 0;
-    }
-    10% { opacity: 0.6; }
-    50% { 
-      transform: translateX(50vw);
-      opacity: 0.4;
-    }
-    90% { opacity: 0.6; }
-    100% { 
-      transform: translateX(100vw);
-      opacity: 0;
-    }
-  }
-  
-  @keyframes data-flow {
-    0% { 
-      transform: translateY(-20px);
-      opacity: 0;
-    }
-    10% { opacity: 1; }
-    90% { opacity: 1; }
-    100% { 
-      transform: translateY(100vh);
-      opacity: 0;
-    }
-  }
-  
-  @keyframes hud-flicker {
-    0%, 100% { 
-      opacity: 0.8;
-      border-color: rgba(0, 212, 255, 0.3);
-    }
-    50% { 
+  @keyframes lamp-breathe {
+    0%,
+    100% {
       opacity: 1;
-      border-color: rgba(0, 212, 255, 0.6);
+    }
+    50% {
+      opacity: 0.45;
     }
   }
-  
-  @keyframes grid-move {
-    0% { transform: translate(0, 0); }
-    100% { transform: translate(50px, 50px); }
-  }
-  
-  @keyframes float-particle {
-    0% { 
-      transform: translateY(100vh) translateX(0px);
-      opacity: 0;
-    }
-    10% { opacity: 1; }
-    90% { opacity: 1; }
-    100% { 
-      transform: translateY(-100px) translateX(50px);
-      opacity: 0;
-    }
-  }
-  
-  @keyframes header-pulse {
-    0%, 100% { 
-      opacity: 0.2;
-      transform: scale(1) translateX(0);
-    }
-    50% { 
-      opacity: 0.4;
-      transform: scale(1.1) translateX(10px);
-    }
-  }
-  
-  @keyframes subtitle-flicker {
-    0%, 100% { 
-      text-shadow: 
-        0 0 10px rgba(0, 212, 255, 0.8),
-        0 0 20px rgba(0, 212, 255, 0.6),
-        0 0 30px rgba(0, 212, 255, 0.4);
-    }
-    25% { 
-      text-shadow: 
-        0 0 15px rgba(0, 212, 255, 1),
-        0 0 25px rgba(0, 212, 255, 0.8),
-        0 0 35px rgba(0, 212, 255, 0.6);
-    }
-    50% { 
-      text-shadow: 
-        0 0 8px rgba(0, 212, 255, 0.6),
-        0 0 18px rgba(0, 212, 255, 0.4),
-        0 0 28px rgba(0, 212, 255, 0.2);
-    }
-    75% { 
-      text-shadow: 
-        0 0 12px rgba(0, 212, 255, 0.9),
-        0 0 22px rgba(0, 212, 255, 0.7),
-        0 0 32px rgba(0, 212, 255, 0.5);
-    }
+
+  .grain {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+    opacity: 0.035;
+    mix-blend-mode: overlay;
   }
 }
 
-/* Custom scrollbar for chat */
 ::-webkit-scrollbar {
-  width: 4px;
+  width: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -294,22 +132,26 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
+  background: rgba(151, 178, 199, 0.18);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(151, 178, 199, 0.3);
 }
 
-/* Smooth transitions */
-* {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-
-/* Focus styles */
 button:focus-visible,
 input:focus-visible {
-  outline: 2px solid rgba(59, 130, 246, 0.5);
+  outline: 1px solid rgba(132, 182, 214, 0.7);
   outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

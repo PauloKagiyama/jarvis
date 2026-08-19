@@ -1,172 +1,149 @@
-import React, { useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
+import React, { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, Square } from 'lucide-react';
+import { ReactorState } from './ArcReactor';
 
 interface VoiceInterfaceProps {
   isListening: boolean;
   onToggle: () => void;
   onVoiceInput: (text: string) => void;
-  state: 'idle' | 'listening' | 'thinking' | 'speaking';
-  audioLevel: number;
+  state: ReactorState;
   onStopSpeaking: () => void;
 }
 
-const VoiceInterface: React.FC<VoiceInterfaceProps> = ({ 
-  isListening, 
-  onToggle, 
-  onVoiceInput, 
+const STATE_TEXT: Record<ReactorState, string> = {
+  idle: 'Awaiting command',
+  listening: 'Listening',
+  thinking: 'Processing request',
+  speaking: 'Responding',
+};
+
+const getRecognitionCtor = () =>
+  typeof window === 'undefined' ? undefined : window.SpeechRecognition || window.webkitSpeechRecognition;
+
+const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
+  isListening,
+  onToggle,
+  onVoiceInput,
   state,
-  audioLevel,
-  onStopSpeaking
+  onStopSpeaking,
 }) => {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const [supported] = useState(() => Boolean(getRecognitionCtor()));
+
+  // The recognition object is built once, but its handlers fire long after
+  // that render. Routing them through refs keeps them reading current values
+  // instead of the props captured when the object was created.
+  const shouldListenRef = useRef(isListening);
+  const onVoiceInputRef = useRef(onVoiceInput);
+  const onToggleRef = useRef(onToggle);
 
   useEffect(() => {
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      
-      const recognition = recognitionRef.current;
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
+    shouldListenRef.current = isListening;
+    onVoiceInputRef.current = onVoiceInput;
+    onToggleRef.current = onToggle;
+  });
 
-      recognition.onresult = (event) => {
-        const transcript = Array.from(event.results)
-          .map(result => result[0])
-          .map(result => result.transcript)
-          .join('');
+  useEffect(() => {
+    const Ctor = getRecognitionCtor();
+    if (!Ctor) return;
 
-        if (event.results[event.results.length - 1].isFinal) {
-          onVoiceInput(transcript);
-        }
-      };
+    const recognition = new Ctor();
+    recognitionRef.current = recognition;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
 
-      recognition.onerror = (event) => {
-        console.error('Speech recognition error:', event.error);
-        // Only stop listening on actual errors, not normal completion
-        if (event.error !== 'no-speech' && event.error !== 'aborted') {
-          onToggle();
-        }
-      };
+    recognition.onresult = (event) => {
+      const last = event.results[event.results.length - 1];
+      if (last.isFinal) {
+        onVoiceInputRef.current(last[0].transcript.trim());
+      }
+    };
 
-      recognition.onend = () => {
-        // Only restart if we're still supposed to be listening
-        if (isListening && state === 'listening') {
+    recognition.onerror = (event) => {
+      if (event.error === 'no-speech' || event.error === 'aborted') return;
+      console.error('Speech recognition error:', event.error);
+      if (shouldListenRef.current) onToggleRef.current();
+    };
+
+    recognition.onend = () => {
+      if (shouldListenRef.current) {
+        try {
           recognition.start();
+        } catch {
+          // Already restarting; the next onend will settle it.
         }
-      };
-    }
+      }
+    };
 
     return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
+      recognition.onend = null;
+      recognition.abort();
+      recognitionRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    if (recognitionRef.current) {
-      if (isListening) {
-        try {
-          recognitionRef.current.start();
-        } catch (error) {
-          console.error('Error starting speech recognition:', error);
-        }
-      } else {
-        recognitionRef.current.stop();
+    const recognition = recognitionRef.current;
+    if (!recognition) return;
+
+    if (isListening) {
+      try {
+        recognition.start();
+      } catch {
+        // start() throws if it is already running — harmless.
       }
+    } else {
+      recognition.stop();
     }
   }, [isListening]);
 
-  const getStateText = () => {
-    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-      return 'Voice recognition not available';
-    }
-    
-    switch (state) {
-      case 'listening':
-        return 'I\'m listening...';
-      case 'thinking':
-        return 'Processing your request...';
-      case 'speaking':
-        return 'JARVIS is responding...';
-      default:
-        return 'Ready for your command';
-    }
-  };
-
   const handleToggle = () => {
-    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-      alert('Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
-      return;
-    }
+    if (!supported) return;
     onToggle();
   };
 
-  return (
-    <div className="flex flex-col items-center space-y-6">
-      {/* Voice Control Buttons */}
-      <div className="flex items-center space-x-4">
-        {/* Main Voice Button */}
-        <motion.button
-          className={`relative w-16 h-16 rounded-full backdrop-blur-md border transition-all duration-300 ${
-            isListening 
-              ? 'bg-cyan-500/20 border-cyan-400 text-cyan-400 shadow-lg shadow-cyan-400/50' 
-              : 'bg-white/5 border-white/20 text-white/60 hover:text-white hover:border-white/40 hover:shadow-lg hover:shadow-white/20'
-          }`}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={handleToggle}
-          animate={{
-            boxShadow: isListening 
-              ? [
-                  '0 0 0 0 rgba(0, 255, 255, 0.4), 0 0 20px rgba(0, 212, 255, 0.3)',
-                  '0 0 0 20px rgba(0, 255, 255, 0), 0 0 40px rgba(0, 212, 255, 0.1)'
-                ]
-              : '0 0 0 0 rgba(255, 255, 255, 0), 0 0 0 rgba(0, 212, 255, 0)'
-          }}
-          transition={{ duration: 1.5, repeat: isListening ? Infinity : 0 }}
-        >
-          {isListening ? (
-            <Mic size={24} className="mx-auto" />
-          ) : (
-            <MicOff size={24} className="mx-auto" />
-          )}
-        </motion.button>
+  const active = isListening;
 
-        {/* Stop Speaking Button - Only show when speaking */}
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div className="flex items-center gap-3">
+        {/* Physical push-button: raised bezel, inset face, pressed state that
+            actually recesses rather than scaling the whole control. */}
+        <button
+          onClick={handleToggle}
+          disabled={!supported}
+          aria-pressed={active}
+          aria-label={active ? 'Stop listening' : 'Start listening'}
+          className={`group relative flex h-14 w-14 items-center justify-center rounded-full border transition-all duration-200 ease-instrument disabled:cursor-not-allowed disabled:opacity-40 ${
+            active
+              ? 'border-ice/60 bg-ice/10 text-ice-bright'
+              : 'border-[rgba(151,178,199,0.2)] bg-hull-800/80 text-[#dde4ea]/55 hover:border-[rgba(151,178,199,0.38)] hover:text-[#dde4ea]/85'
+          }`}
+          style={{
+            boxShadow: active
+              ? 'inset 0 1px 0 rgba(190,214,230,0.2), inset 0 0 14px rgba(132,182,214,0.22), 0 0 18px -4px rgba(132,182,214,0.5)'
+              : 'inset 0 1px 0 rgba(190,214,230,0.09), inset 0 -2px 5px rgba(0,0,0,0.55), 0 6px 14px -8px rgba(0,0,0,0.9)',
+          }}
+        >
+          {active ? <Mic size={19} strokeWidth={1.6} /> : <MicOff size={19} strokeWidth={1.6} />}
+          {active && (
+            <span className="pointer-events-none absolute inset-0 rounded-full border border-ice/25 animate-[lamp-breathe_2.4s_ease-in-out_infinite]" />
+          )}
+        </button>
+
         {state === 'speaking' && (
-          <motion.button
-            className="w-12 h-12 rounded-full bg-red-500/20 border border-red-400 text-red-400 backdrop-blur-md hover:bg-red-500/30 transition-all duration-300 shadow-lg shadow-red-400/30"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+          <button
             onClick={onStopSpeaking}
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            title="Stop Speaking"
+            aria-label="Stop speaking"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-signal-alert/45 bg-signal-alert/10 text-signal-alert transition-colors duration-200 hover:bg-signal-alert/20"
           >
-            <Square size={16} className="mx-auto" />
-          </motion.button>
+            <Square size={13} strokeWidth={2} />
+          </button>
         )}
       </div>
 
-      {/* Status Text */}
-      <motion.p 
-        className="text-white/60 text-sm font-light text-center font-mono tracking-wider"
-        animate={{ 
-          opacity: [0.6, 1, 0.6],
-          textShadow: [
-            '0 0 4px rgba(0, 212, 255, 0.3)',
-            '0 0 8px rgba(0, 212, 255, 0.6)',
-            '0 0 4px rgba(0, 212, 255, 0.3)'
-          ]
-        }}
-        transition={{ duration: 3, repeat: Infinity }}
-      >
-        {getStateText()}
-      </motion.p>
+      <p className="etch">{supported ? STATE_TEXT[state] : 'Voice input unavailable'}</p>
     </div>
   );
 };

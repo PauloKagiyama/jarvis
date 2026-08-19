@@ -1,423 +1,341 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Group, Mesh } from 'three';
+import { Environment, Lightformer } from '@react-three/drei';
+import { Group, Mesh, MeshStandardMaterial, PointLight } from 'three';
 import * as THREE from 'three';
 
+export type ReactorState = 'idle' | 'listening' | 'thinking' | 'speaking';
+
 interface ArcReactorProps {
-  state: 'idle' | 'listening' | 'thinking' | 'speaking';
+  state: ReactorState;
   taskComplexity: number;
   audioLevel: number;
 }
 
+const EMISSION_COLOR = {
+  idle: new THREE.Color('#7fb4d8'),
+  listening: new THREE.Color('#9ed2f0'),
+  thinking: new THREE.Color('#c9a86a'),
+  speaking: new THREE.Color('#a8d8f5'),
+} as const;
+
+/* Heavy workloads bias the emitter toward a hot amber, the way a real device
+   under load runs warmer. Blended, not switched, so the shift reads as strain. */
+const LOAD_COLOR = new THREE.Color('#d08850');
+
+/* Depth envelope of the housing. Everything internal is placed relative to
+   these so the assembly stays a solid object from any viewing angle. */
+const FRONT_Z = 0.62;
+const BACK_Z = -0.86;
+
+/* The winding sits on a former ring inside the barrel, recessed behind the
+   bezel so you look *into* the device rather than at a decal on its face. */
+const COIL_RING_RADIUS = 2.46;
+const COIL_Z = 0.05;
+const FORMER_TUBE = 0.15;
+
+/* Housing plate: extruded with a bevel so its silhouette catches a real
+   specular edge. Flat ShapeGeometry reads as paper under any lighting. */
+function useSegmentGeometry(outer: number, waist: number, height: number) {
+  return useMemo(() => {
+    const shape = new THREE.Shape();
+    shape.moveTo(-waist, 0);
+    shape.lineTo(waist, 0);
+    shape.lineTo(outer, height);
+    shape.lineTo(-outer, height);
+    shape.closePath();
+
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth: 0.08,
+      bevelEnabled: true,
+      bevelThickness: 0.012,
+      bevelSize: 0.012,
+      bevelSegments: 2,
+    });
+    geo.center();
+    return geo;
+  }, [outer, waist, height]);
+}
+
 const ArcReactor: React.FC<ArcReactorProps> = ({ state, taskComplexity, audioLevel }) => {
   const groupRef = useRef<Group>(null);
-  const outerRingRef = useRef<Mesh>(null);
-  const middleRingRef = useRef<Mesh>(null);
-  const innerRingRef = useRef<Mesh>(null);
+  const shroudRef = useRef<Group>(null);
   const coreRef = useRef<Mesh>(null);
-  const segmentRefs = useRef<Mesh[]>([]);
-  const innerSegmentRefs = useRef<Mesh[]>([]);
+  const coreMatRef = useRef<MeshStandardMaterial>(null);
+  const keyLightRef = useRef<PointLight>(null);
 
-  // Add particle system for enhanced visual effects
-  const particleRefs = useRef<Mesh[]>([]);
-  const particleCount = 50;
-  
-  // Add waveform visualization in the center
-  const waveformRefs = useRef<Mesh[]>([]);
-  const waveformCount = 16;
+  const segmentGeometry = useSegmentGeometry(0.34, 0.2, 0.62);
+  // Wire radius sits just proud of the former tube so each turn hugs the ring
+  // it is wound on instead of hooping loosely around it.
+  const coilGeometry = useMemo(
+    () => new THREE.TorusGeometry(FORMER_TUBE + 0.038, 0.034, 10, 26),
+    [],
+  );
 
-  // Create triangular/trapezoidal segments like in the reference
-  const segmentGeometry = useMemo(() => {
-    const shape = new THREE.Shape();
-    // Create a trapezoidal shape
-    shape.moveTo(0, 1.2);
-    shape.lineTo(-0.4, 0.8);
-    shape.lineTo(-0.3, 0.3);
-    shape.lineTo(0.3, 0.3);
-    shape.lineTo(0.4, 0.8);
-    shape.lineTo(0, 1.2);
-    return new THREE.ShapeGeometry(shape);
+  // Ten bundles of five turns wrapped around the outer housing. Each turn's
+  // axis is tangent to the ring, which is what makes it read as wound wire
+  // rather than as loose rings floating near the housing.
+  const coilTransforms = useMemo(() => {
+    const turns: Array<{
+      key: string;
+      position: [number, number, number];
+      rotation: [number, number, number];
+    }> = [];
+
+    for (let bundle = 0; bundle < 10; bundle++) {
+      const centre = (bundle / 10) * Math.PI * 2;
+      for (let turn = -2; turn <= 2; turn++) {
+        const angle = centre + turn * 0.07;
+        turns.push({
+          key: `coil-${bundle}-${turn}`,
+          position: [Math.cos(angle) * COIL_RING_RADIUS, Math.sin(angle) * COIL_RING_RADIUS, COIL_Z],
+          rotation: [0, Math.PI / 2, angle + Math.PI / 2],
+        });
+      }
+    }
+    return turns;
   }, []);
 
-  const innerSegmentGeometry = useMemo(() => {
-    const shape = new THREE.Shape();
-    // Smaller inner segments
-    shape.moveTo(0, 0.6);
-    shape.lineTo(-0.2, 0.4);
-    shape.lineTo(-0.15, 0.2);
-    shape.lineTo(0.15, 0.2);
-    shape.lineTo(0.2, 0.4);
-    shape.lineTo(0, 0.6);
-    return new THREE.ShapeGeometry(shape);
-  }, []);
+  const emission = useMemo(
+    () => EMISSION_COLOR[state].clone().lerp(LOAD_COLOR, Math.max(0, taskComplexity - 0.6) * 1.5),
+    [state, taskComplexity],
+  );
+  const targetIntensity = useRef(1);
 
-  // Particle geometry for floating energy particles
-  const particleGeometry = useMemo(() => new THREE.SphereGeometry(0.02, 8, 8), []);
+  useFrame((frame, delta) => {
+    const t = frame.clock.getElapsedTime();
 
-  // Waveform geometry for center visualization
-  const waveformGeometry = useMemo(() => new THREE.BoxGeometry(0.02, 1, 0.02), []);
-  useFrame((frameState) => {
-    const time = frameState.clock.getElapsedTime();
-    
-    // Smooth main rotation
-    if (groupRef.current) {
-      groupRef.current.rotation.z = time * 0.15;
+    // Slow, constant-rate rotation. Real machinery does not ease in and out.
+    if (groupRef.current) groupRef.current.rotation.z = t * 0.06;
+    if (shroudRef.current) shroudRef.current.rotation.z = -t * 0.11;
+
+    // Output level is driven by state, then smoothed so transitions ramp like
+    // a power supply settling rather than snapping between values.
+    const base =
+      state === 'speaking' ? 2.5 : state === 'thinking' ? 2.1 : state === 'listening' ? 1.8 : 1.15;
+    const modulation =
+      state === 'speaking'
+        ? Math.sin(t * 9) * 0.18 + Math.sin(t * 3.1) * 0.1
+        : state === 'listening'
+          ? audioLevel * 0.5
+          : state === 'thinking'
+            ? Math.sin(t * 2.4) * 0.14
+            : Math.sin(t * 0.9) * 0.05;
+
+    targetIntensity.current += (base + modulation - targetIntensity.current) * Math.min(1, delta * 6);
+
+    if (coreMatRef.current) {
+      coreMatRef.current.emissiveIntensity = targetIntensity.current;
+      coreMatRef.current.emissive.lerp(emission, Math.min(1, delta * 4));
     }
-    
-    // Outer ring - smooth pulsing animation
-    if (outerRingRef.current) {
-      outerRingRef.current.rotation.z = -time * 0.25;
-      
-      // Smooth intensity pulsing based on state
-      const baseIntensity = state === 'thinking' ? 1.3 : 
-                           state === 'listening' ? 1.2 : 
-                           state === 'speaking' ? 1.4 : 1;
-      
-      // Smooth audio response for listening state
-      const audioResponse = state === 'listening' ? audioLevel * 0.2 : 0;
-      const smoothPulse = Math.sin(time * 1.5) * 0.05;
-      const scale = 1 + smoothPulse * baseIntensity + audioResponse;
-      outerRingRef.current.scale.setScalar(scale);
+    if (keyLightRef.current) {
+      keyLightRef.current.intensity = targetIntensity.current * 3.2;
+      keyLightRef.current.color.lerp(emission, Math.min(1, delta * 4));
     }
-    
-    // Middle ring
-    if (middleRingRef.current) {
-      middleRingRef.current.rotation.z = time * 0.35;
-    }
-    
-    // Inner ring counter-rotation
-    if (innerRingRef.current) {
-      innerRingRef.current.rotation.z = -time * 0.45;
-    }
-    
-    // Core with smooth pulsing and audio response
+    // Thermal swell only — a few percent, never a visible "bounce".
     if (coreRef.current) {
-      const powerLevel = state === 'thinking' ? 1.4 : 
-                        state === 'listening' ? 1.2 : 
-                        state === 'speaking' ? 1.5 : 1;
-      
-      // Smooth audio visualization for speaking
-      const audioResponse = state === 'speaking' ? Math.sin(time * 6) * 0.15 : 0;
-      const smoothCorePulse = Math.sin(time * 2) * 0.08;
-      const scale = 1 + smoothCorePulse * powerLevel + audioResponse;
-      coreRef.current.scale.setScalar(scale);
+      coreRef.current.scale.setScalar(1 + (targetIntensity.current - 1.15) * 0.012);
     }
-    
-    // Outer segments with smooth individual animation
-    segmentRefs.current.forEach((segment, index) => {
-      if (segment) {
-        const offset = (index / 12) * Math.PI * 2;
-        const rotationSpeed = 0.08;
-        segment.rotation.z = time * rotationSpeed + offset;
-        
-        // Smooth wave effect
-        const pulseOffset = index * 0.5;
-        const wave = Math.sin(time * 1.2 + pulseOffset) * 0.03;
-        const scale = 1 + wave;
-        segment.scale.setScalar(scale);
-      }
-    });
-
-    // Inner segments
-    innerSegmentRefs.current.forEach((segment, index) => {
-      if (segment) {
-        const offset = (index / 8) * Math.PI * 2;
-        segment.rotation.z = -time * 0.12 + offset;
-        
-        const pulseOffset = index * 0.8;
-        const wave = Math.sin(time * 1.8 + pulseOffset) * 0.04;
-        const scale = 1 + wave;
-        segment.scale.setScalar(scale);
-      }
-    });
-
-    // Animate floating particles around the reactor
-    particleRefs.current.forEach((particle, index) => {
-      if (particle) {
-        const radius = 4 + Math.sin(time * 0.5 + index) * 0.5;
-        const angle = time * 0.3 + (index / particleCount) * Math.PI * 2;
-        const height = Math.sin(time * 0.8 + index * 0.5) * 0.3;
-        
-        particle.position.x = Math.cos(angle) * radius;
-        particle.position.y = Math.sin(angle) * radius;
-        particle.position.z = height;
-        
-        // Fade particles based on state
-        const opacity = state === 'thinking' ? 0.8 : 
-                       state === 'listening' ? 0.6 : 
-                       state === 'speaking' ? 1.0 : 0.4;
-        
-        if (particle.material instanceof THREE.MeshPhysicalMaterial) {
-          particle.material.opacity = opacity * (0.5 + Math.sin(time * 2 + index) * 0.3);
-        }
-      }
-    });
-
-    // Animate center waveforms based on audio level and state
-    waveformRefs.current.forEach((waveform, index) => {
-      if (waveform) {
-        const angle = (index / waveformCount) * Math.PI * 2;
-        const radius = 0.3; // Keep waveforms in center circle
-        
-        // Position waveforms in a circle - ABSOLUTELY NO ROTATION OF ANY KIND
-        waveform.position.x = Math.cos(angle) * radius;
-        waveform.position.z = Math.sin(angle) * radius;
-        waveform.position.y = 0;
-        
-        // CRITICAL: Keep waveforms completely upright - ZERO ROTATION
-        waveform.rotation.set(0, 0, 0);
-        
-        // FORCE the waveform to stay upright by overriding any rotation
-        waveform.rotation.x = 0;
-        waveform.rotation.y = 0;
-        waveform.rotation.z = 0;
-        
-        // Animate height based on audio level and state
-        let baseHeight = 0.2;
-        let audioResponse = 0;
-        
-        if (state === 'listening') {
-          audioResponse = audioLevel * 0.8 + Math.sin(time * 8 + index * 0.5) * 0.3;
-        } else if (state === 'speaking') {
-          audioResponse = Math.sin(time * 12 + index * 0.8) * 0.6 + Math.cos(time * 6 + index * 0.3) * 0.4;
-        } else if (state === 'thinking') {
-          audioResponse = Math.sin(time * 4 + index * 0.4) * 0.4;
-        } else {
-          audioResponse = Math.sin(time * 2 + index * 0.2) * 0.1;
-        }
-        
-        const height = baseHeight + Math.max(0, audioResponse);
-        waveform.scale.y = height;
-      }
-    });
   });
 
-  // Dynamic colors based on state
-  const getReactorColor = () => {
-    if (taskComplexity > 0.7) return new THREE.Color(0xff4444); // Red for high complexity
-    switch (state) {
-      case 'listening': return new THREE.Color(0x00ffff); // Cyan
-      case 'thinking': return new THREE.Color(0x4fc3f7);  // Light blue
-      case 'speaking': return new THREE.Color(0x00e5ff);  // Bright cyan
-      default: return new THREE.Color(0x00d4ff);          // Classic blue
-    }
-  };
-
-  const reactorColor = getReactorColor();
-
-  // Enhanced materials with better lighting
-  const outerRingMaterial = useMemo(() => new THREE.MeshPhysicalMaterial({
-    color: 0x333333,
-    metalness: 0.95,
-    roughness: 0.05,
-    transparent: true,
-    opacity: 0.9,
-    emissive: reactorColor,
-    emissiveIntensity: 0.4,
-  }), [reactorColor]);
-
-  const middleRingMaterial = useMemo(() => new THREE.MeshPhysicalMaterial({
-    color: 0x444444,
-    metalness: 0.9,
-    roughness: 0.1,
-    transparent: true,
-    opacity: 0.8,
-    emissive: reactorColor,
-    emissiveIntensity: 0.3,
-  }), [reactorColor]);
-
-  const innerRingMaterial = useMemo(() => new THREE.MeshPhysicalMaterial({
-    color: 0x555555,
-    metalness: 0.85,
-    roughness: 0.15,
-    transparent: true,
-    opacity: 0.7,
-    emissive: reactorColor,
-    emissiveIntensity: 0.2,
-  }), [reactorColor]);
-
-  const coreMaterial = useMemo(() => new THREE.MeshPhysicalMaterial({
-    color: reactorColor,
-    metalness: 0.3,
-    roughness: 0.1,
-    transparent: true,
-    opacity: 0.95,
-    emissive: reactorColor,
-    emissiveIntensity: 0.8,
-    transmission: 0.4,
-    thickness: 0.3,
-  }), [reactorColor]);
-
-  const segmentMaterial = useMemo(() => new THREE.MeshPhysicalMaterial({
-    color: 0x666666,
-    metalness: 0.9,
-    roughness: 0.1,
-    transparent: true,
-    opacity: 0.8,
-    emissive: reactorColor,
-    emissiveIntensity: 0.3,
-    side: THREE.DoubleSide,
-  }), [reactorColor]);
-
-  const innerSegmentMaterial = useMemo(() => new THREE.MeshPhysicalMaterial({
-    color: 0x777777,
-    metalness: 0.85,
-    roughness: 0.15,
-    transparent: true,
-    opacity: 0.7,
-    emissive: reactorColor,
-    emissiveIntensity: 0.25,
-    side: THREE.DoubleSide,
-  }), [reactorColor]);
-
-  const particleMaterial = useMemo(() => new THREE.MeshPhysicalMaterial({
-    color: reactorColor,
-    metalness: 0.1,
-    roughness: 0.1,
-    transparent: true,
-    opacity: 0.6,
-    emissive: reactorColor,
-    emissiveIntensity: 0.5,
-  }), [reactorColor]);
-
-  const waveformMaterial = useMemo(() => new THREE.MeshPhysicalMaterial({
-    color: reactorColor,
-    metalness: 0.2,
-    roughness: 0.1,
-    transparent: true,
-    opacity: 0.8,
-    emissive: reactorColor,
-    emissiveIntensity: 0.6,
-  }), [reactorColor]);
   return (
-    <group ref={groupRef} scale={[0.6, 0.6, 0.6]} position={[0, 0, 0]}>
-      {/* Outer Ring */}
-      <mesh ref={outerRingRef} material={outerRingMaterial}>
-        <torusGeometry args={[3.2, 0.08, 16, 64]} />
-      </mesh>
-      
-      {/* Middle Ring */}
-      <mesh ref={middleRingRef} material={middleRingMaterial}>
-        <torusGeometry args={[2.6, 0.06, 16, 64]} />
-      </mesh>
-      
-      {/* Inner Ring */}
-      <mesh ref={innerRingRef} material={innerRingMaterial}>
-        <torusGeometry args={[2.0, 0.04, 16, 64]} />
-      </mesh>
-      
-      {/* Central Core */}
-      <mesh ref={coreRef} material={coreMaterial}>
-        <cylinderGeometry args={[0.8, 0.8, 0.15, 32]} />
-      </mesh>
-      
-      {/* Center Waveform Visualization */}
-      {Array.from({ length: waveformCount }, (_, i) => (
-        <mesh
-          key={`waveform-${i}`}
-          ref={(el) => {
-            if (el) waveformRefs.current[i] = el;
-          }}
-          geometry={waveformGeometry}
-          material={waveformMaterial}
-        />
-      ))}
-      
-      {/* Outer Segments (12 pieces) */}
-      {Array.from({ length: 12 }, (_, i) => {
-        const angle = (i / 12) * Math.PI * 2;
-        const radius = 2.8;
-        
-        return (
-          <mesh
-            key={`outer-${i}`}
-            ref={(el) => {
-              if (el) segmentRefs.current[i] = el;
-            }}
-            position={[
-              Math.cos(angle) * radius,
-              Math.sin(angle) * radius,
-              0.08
-            ]}
-            rotation={[0, 0, angle + Math.PI / 2]}
-            scale={[0.3, 0.3, 1]}
-            material={segmentMaterial}
-            geometry={segmentGeometry}
-          />
-        );
-      })}
+    <>
+      {/* Local IBL. Lightformers build the env map in-scene, so reflections are
+          real and nothing is fetched from a CDN at runtime. */}
+      <Environment resolution={256}>
+        {/* Metal at metalness 1 has no diffuse colour of its own — every value
+            you see is reflected environment, so these have to be genuinely
+            bright or the housing renders as black. */}
+        <Lightformer intensity={6} position={[0, 5, 3]} scale={[10, 3, 1]} color="#f0eee9" />
+        <Lightformer intensity={2.6} position={[-6, -1, 2]} scale={[4, 6, 1]} color="#9c9a96" />
+        <Lightformer intensity={2} position={[6, 1, -3]} scale={[4, 5, 1]} color="#b0aca6" />
+        <Lightformer intensity={1.4} position={[0, -5, 1]} scale={[8, 2, 1]} color="#6b6862" />
+        <Lightformer intensity={1.1} form="ring" position={[0, 0, 4]} scale={4} color="#7ea8c4" />
+        {/* Rear fill — without a source behind it, orbiting round the back
+            finds an unlit black disc, since metal only shows what it reflects. */}
+        <Lightformer intensity={3.2} position={[0, 3, -6]} scale={[9, 4, 1]} color="#939ea8" />
+        <Lightformer intensity={1.6} position={[-4, -2, -5]} scale={[5, 4, 1]} color="#6a7078" />
+      </Environment>
 
-      {/* Inner Segments (8 pieces) */}
-      {Array.from({ length: 8 }, (_, i) => {
-        const angle = (i / 8) * Math.PI * 2;
-        const radius = 1.6;
-        
-        return (
-          <mesh
-            key={`inner-${i}`}
-            ref={(el) => {
-              if (el) innerSegmentRefs.current[i] = el;
-            }}
-            position={[
-              Math.cos(angle) * radius,
-              Math.sin(angle) * radius,
-              0.05
-            ]}
-            rotation={[0, 0, angle + Math.PI / 2]}
-            scale={[0.4, 0.4, 1]}
-            material={innerSegmentMaterial}
-            geometry={innerSegmentGeometry}
-          />
-        );
-      })}
-      
-      {/* Floating Energy Particles */}
-      {Array.from({ length: particleCount }, (_, i) => (
-        <mesh
-          key={`particle-${i}`}
-          ref={(el) => {
-            if (el) particleRefs.current[i] = el;
-          }}
-          geometry={particleGeometry}
-          material={particleMaterial}
-        />
-      ))}
-      
-      {/* Enhanced Lighting System */}
-      <pointLight 
-        position={[0, 0, 2]} 
-        intensity={2 + taskComplexity * 0.8} 
-        color={reactorColor}
-        distance={12}
-        decay={1.5}
-      />
-      
-      {/* Rim lighting for depth */}
-      <spotLight
-        position={[0, 0, 4]}
-        angle={Math.PI / 2.5}
-        penumbra={0.3}
-        intensity={1.2}
-        color={reactorColor}
-        target-position={[0, 0, 0]}
-      />
+      <group ref={groupRef} scale={0.54} position={[0, 0.35, 0]}>
+        {/* Front bezel, sitting proud of the housing lip. */}
+        <mesh position={[0, 0, FRONT_Z]}>
+          <torusGeometry args={[3.1, 0.2, 24, 96]} />
+          <meshStandardMaterial color="#9aa3ad" metalness={1} roughness={0.31} envMapIntensity={1.6} />
+        </mesh>
 
-      {/* Additional ambient glow */}
-      <pointLight 
-        position={[0, 0, -1]} 
-        intensity={0.8} 
-        color={reactorColor}
-        distance={8}
-        decay={2}
-      />
-      
-      {/* Dynamic environment lighting */}
-      <hemisphereLight
-        skyColor={reactorColor}
-        groundColor={new THREE.Color(0x000033)}
-        intensity={0.3}
-      />
-    </group>
+        {/* Housing barrel. The device is a cylinder with real depth, not a
+            disc — this wall is what you actually see when orbiting to the side. */}
+        <mesh position={[0, 0, (FRONT_Z + BACK_Z) / 2]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[3.16, 3.16, FRONT_Z - BACK_Z, 96, 1, true]} />
+          <meshStandardMaterial
+            color="#7e858d"
+            metalness={1}
+            roughness={0.36}
+            envMapIntensity={1.4}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+
+        {/* Machined relief bands around the barrel. */}
+        {[0.22, 0.55].map((t) => (
+          <mesh key={`band-${t}`} position={[0, 0, FRONT_Z - (FRONT_Z - BACK_Z) * t]}>
+            <torusGeometry args={[3.19, 0.045, 12, 96]} />
+            <meshStandardMaterial color="#5c636b" metalness={1} roughness={0.44} envMapIntensity={1.1} />
+          </mesh>
+        ))}
+
+        {/* Recessed interior floor the shroud and emitter sit above. */}
+        <mesh position={[0, 0, BACK_Z + 0.12]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[3.14, 3.14, 0.16, 96]} />
+          <meshStandardMaterial color="#2a2e34" metalness={0.8} roughness={0.7} envMapIntensity={0.7} />
+        </mesh>
+
+        {/* Rear face: closing plate, mounting boss and bolt ring, so orbiting
+            all the way round finds a finished back rather than a hollow shell. */}
+        <group position={[0, 0, BACK_Z]}>
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[3.16, 3.16, 0.14, 96]} />
+            <meshStandardMaterial color="#4a515a" metalness={0.95} roughness={0.52} envMapIntensity={1} />
+          </mesh>
+          <mesh position={[0, 0, -0.24]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[1.5, 1.9, 0.42, 64]} />
+            <meshStandardMaterial color="#3f454d" metalness={1} roughness={0.46} envMapIntensity={1} />
+          </mesh>
+          <mesh position={[0, 0, -0.5]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.62, 0.62, 0.2, 48]} />
+            <meshStandardMaterial color="#6d747c" metalness={1} roughness={0.34} envMapIntensity={1.3} />
+          </mesh>
+          {Array.from({ length: 16 }, (_, i) => {
+            const angle = (i / 16) * Math.PI * 2;
+            return (
+              <mesh
+                key={`bolt-${i}`}
+                position={[Math.cos(angle) * 2.62, Math.sin(angle) * 2.62, -0.11]}
+                rotation={[Math.PI / 2, 0, 0]}
+              >
+                <cylinderGeometry args={[0.075, 0.075, 0.09, 12]} />
+                <meshStandardMaterial color="#8d949c" metalness={1} roughness={0.3} envMapIntensity={1.4} />
+              </mesh>
+            );
+          })}
+        </group>
+
+        {/* Former ring carrying the winding. */}
+        <mesh position={[0, 0, COIL_Z]}>
+          <torusGeometry args={[COIL_RING_RADIUS, FORMER_TUBE, 16, 80]} />
+          <meshStandardMaterial color="#40464e" metalness={1} roughness={0.45} envMapIntensity={1} />
+        </mesh>
+
+        {/* Copper windings — the detail that sells it as built hardware.
+            Grouped into ten bundles of five turns, the way wire is actually
+            wound onto a core, rather than spaced evenly like decoration. */}
+        {coilTransforms.map(({ key, position, rotation }) => (
+          <mesh key={key} geometry={coilGeometry} position={position} rotation={rotation}>
+            <meshStandardMaterial
+              color="#c2793c"
+              metalness={1}
+              roughness={0.38}
+              envMapIntensity={1.5}
+            />
+          </mesh>
+        ))}
+
+        {/* Counter-rotating shroud of bevelled plates. */}
+        <group ref={shroudRef}>
+          {Array.from({ length: 12 }, (_, i) => {
+            const angle = (i / 12) * Math.PI * 2;
+            const radius = 1.72;
+            return (
+              <mesh
+                key={`plate-${i}`}
+                geometry={segmentGeometry}
+                position={[Math.cos(angle) * radius, Math.sin(angle) * radius, 0.2]}
+                rotation={[0, 0, angle - Math.PI / 2]}
+               
+              >
+                <meshStandardMaterial
+                  color="#8d949c"
+                  metalness={1}
+                  roughness={0.26}
+                  envMapIntensity={1.5}
+                />
+              </mesh>
+            );
+          })}
+        </group>
+
+        {/* Containment ring around the emitter. */}
+        <mesh position={[0, 0, 0.24]}>
+          <torusGeometry args={[1.12, 0.075, 20, 80]} />
+          <meshStandardMaterial color="#3d434b" metalness={1} roughness={0.3} envMapIntensity={1} />
+        </mesh>
+
+        {/* Emitter: the only genuinely bright surface in the whole scene.
+            Tone mapping is left ON so the highlight rolls off filmically —
+            bypassing it is what turns an emitter into a flat white disc. */}
+        <mesh ref={coreRef} position={[0, 0, 0.2]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.92, 0.92, 0.1, 64]} />
+          <meshStandardMaterial
+            ref={coreMatRef}
+            color="#0d1116"
+            emissive={EMISSION_COLOR.idle}
+            emissiveIntensity={1.15}
+            metalness={0.2}
+            roughness={0.22}
+          />
+        </mesh>
+
+        {/* Emitter grille: dark spokes and a hub occluding the plasma face, so
+            it reads as a structured aperture instead of a glowing hole. */}
+        <group position={[0, 0, 0.3]}>
+          {/* Bars stop short of the hub — full-width spokes would overlap each
+              other at the centre and z-fight into a dark cross. */}
+          {Array.from({ length: 12 }, (_, i) => {
+            const angle = (i / 12) * Math.PI * 2;
+            const midpoint = 0.58;
+            return (
+              <mesh
+                key={`spoke-${i}`}
+                position={[Math.cos(angle) * midpoint, Math.sin(angle) * midpoint, 0]}
+                rotation={[0, 0, angle]}
+              >
+                <boxGeometry args={[0.58, 0.035, 0.02]} />
+                <meshStandardMaterial color="#232a31" metalness={0.95} roughness={0.4} />
+              </mesh>
+            );
+          })}
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.2, 0.2, 0.05, 32]} />
+            <meshStandardMaterial color="#2a323a" metalness={1} roughness={0.32} envMapIntensity={1.4} />
+          </mesh>
+          {/* No rotation: a torus already lies in the XY plane. Turning it 90°
+              about X puts it edge-on to the camera and it renders as a line. */}
+          <mesh>
+            <torusGeometry args={[0.55, 0.03, 12, 48]} />
+            <meshStandardMaterial color="#242b33" metalness={1} roughness={0.35} />
+          </mesh>
+        </group>
+
+        {/* Diffuser glass over the emitter. */}
+        <mesh position={[0, 0, 0.37]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.98, 0.98, 0.02, 64]} />
+          <meshPhysicalMaterial
+            color="#c6dced"
+            transmission={0.95}
+            thickness={0.3}
+            roughness={0.14}
+            ior={1.45}
+            transparent
+            opacity={0.35}
+          />
+        </mesh>
+
+        {/* Light thrown by the emitter onto its own housing. */}
+        <pointLight ref={keyLightRef} position={[0, 0, 1.1]} distance={9} decay={2} />
+        <pointLight position={[0, 0, -0.6]} intensity={0.5} color="#4d7891" distance={5} decay={2} />
+      </group>
+    </>
   );
 };
 
