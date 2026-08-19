@@ -41,7 +41,7 @@ Design notes worth calling out:
 Requires Node 18+.
 
 ```bash
-git clone https://github.com/r37033ac/jarvis.git
+git clone https://github.com/thisisreyy/jarvis.git
 cd jarvis
 npm install
 npm run dev
