@@ -1,148 +1,93 @@
-# JARVIS AI Assistant
+# JARVIS
 
-A futuristic AI assistant interface inspired by Tony Stark's JARVIS from the Iron Man films. This project features a stunning 3D arc reactor visualization, voice recognition, and AI-powered conversations.
+A voice-driven AI assistant built around a real-time 3D arc reactor. React, Three.js, and Claude, with the model behind a rate-limited backend so the API key never reaches the browser.
 
-![JARVIS Interface](https://via.placeholder.com/800x400/000000/00d4ff?text=JARVIS+AI+Assistant)
+![The JARVIS interface](docs/screenshot-main.png)
 
-## ✨ Features
+## What it does
 
-- **3D Arc Reactor Visualization**: Interactive arc reactor with dynamic animations and particle effects
-- **Voice Recognition**: Speak to JARVIS using your browser's speech recognition
-- **AI-Powered Conversations**: Powered by OpenAI's GPT models for intelligent responses
-- **Text-to-Speech**: JARVIS speaks back with a sophisticated voice
-- **Memory System**: Remembers conversations and learns about user preferences
-- **Futuristic UI**: Holographic interface with scanning lines and floating particles
-- **Real-time Status**: Live system monitoring and status indicators
+- **Orbitable 3D reactor** — a physically-lit model with copper windings, a machined housing, and a finished back. Drag to rotate, scroll to zoom; the unit stays centred.
+- **Reactor reflects assistant state** — the emitter shifts colour and output between standby, listening, processing, and responding, and runs warm amber under heavy load.
+- **Voice in, voice out** — browser speech recognition for input, speech synthesis for replies, with barge-in support to cut the assistant off mid-sentence.
+- **Conversation memory** — recent exchanges are replayed to the model as real dialogue turns, and durable facts (name, occupation, recurring topics) are extracted and reused across sessions.
+- **Always demonstrable** — with no API key configured the app serves scripted replies instead of an error, so the interface is fully explorable. The status panel reports `Demo` rather than pretending to be live.
 
-## 🚀 Technologies Used
+| Orbit the reactor | Chat panel |
+|---|---|
+| ![Reactor seen from three-quarters](docs/screenshot-orbit.png) | ![Chat panel in demo mode](docs/screenshot-chat.png) |
 
-- **React 18** with TypeScript
-- **Three.js** & **React Three Fiber** for 3D graphics
-- **Framer Motion** for smooth animations
-- **Tailwind CSS** for styling
-- **OpenAI API** for AI responses
-- **Web Speech API** for voice recognition and synthesis
-- **Vite** for fast development and building
+## Architecture
 
-## 🛠️ Setup Instructions
+The browser never holds a provider credential. Chat requests go to this app's own `/api/chat` function, which holds the key server-side and talks to Claude:
 
-### Prerequisites
-
-- Node.js 18+ installed
-- OpenAI API key (get one at [OpenAI Platform](https://platform.openai.com/api-keys))
-
-### Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/jarvis-ai-assistant.git
-cd jarvis-ai-assistant
+```
+browser  ──POST /api/chat──▶  edge function  ──▶  Claude (Haiku 4.5)
+   │                              │
+   │                         rate limiting
+   │                      (per-IP + daily cap)
+   ▼
+scripted demo replies  ◀── 503 / 429 fallback
 ```
 
-2. Install dependencies:
+Design notes worth calling out:
+
+- **No key in the bundle.** The env var is deliberately *not* `VITE_`-prefixed; anything with that prefix is inlined into client JS and readable by any visitor.
+- **History as messages, not prose.** Prior turns are sent in the `messages` array rather than pasted into the system prompt. That keeps the system prefix byte-stable — a prerequisite for prompt caching — and gives the model structured dialogue instead of a summary of one.
+- **Rate limiting is in-memory**, which resets on cold start and isn't shared across instances. That's a deliberate trade for a portfolio demo; the global daily cap is the real backstop. Production would use Vercel KV or Upstash.
+- **Storage is local only.** Conversation memory lives in `localStorage` in one browser. There is no account system and no sync.
+
+## Running it
+
+Requires Node 18+.
+
 ```bash
+git clone https://github.com/r37033ac/jarvis.git
+cd jarvis
 npm install
-```
-
-3. Set up environment variables:
-```bash
-cp .env.example .env
-```
-
-4. Edit `.env` and add your OpenAI API key:
-```
-VITE_OPENAI_API_KEY=your_openai_api_key_here
-```
-
-5. Start the development server:
-```bash
 npm run dev
 ```
 
-6. Open your browser and navigate to `http://localhost:5173`
+Open http://localhost:5173. It runs in demo mode out of the box.
 
-## 🎮 Usage
+To connect a live model, add a key — server-side, never `VITE_`-prefixed:
 
-1. **Voice Interaction**: Click the microphone button and speak to JARVIS
-2. **Text Chat**: Click "Show Chat" to open the text interface
-3. **Memory Core**: Click "Memory Core" to view conversation history and user profile
-4. **System Status**: Click "System Status" for diagnostics
-
-## 🎨 Features Overview
-
-### Arc Reactor
-- Dynamic 3D visualization with multiple rotating rings
-- Audio-reactive waveforms in the center
-- State-based color changes (idle, listening, thinking, speaking)
-- Floating energy particles
-
-### Voice Interface
-- Browser-based speech recognition
-- Natural language processing via OpenAI
-- Text-to-speech with customizable voice settings
-- Real-time audio level visualization
-
-### Memory System
-- Persistent conversation storage
-- User profile building
-- Topic analysis and preferences
-- Multi-device synchronization
-
-### UI Elements
-- Holographic text effects
-- Scanning line animations
-- Floating particles
-- Real-time clock and system status
-- Responsive design
-
-## 🔧 Configuration
-
-### Voice Settings
-Modify voice parameters in `src/services/OpenAIService.ts`:
-```typescript
-utterance.rate = 0.9; // Speech speed
-utterance.pitch = 0.6; // Voice pitch
-utterance.volume = 1.0; // Volume level
+```bash
+cp .env.example .env
+# then set ANTHROPIC_API_KEY in .env
 ```
 
-### Visual Effects
-Customize animations in `src/index.css` and component files.
+Get a key from the [Anthropic Console](https://console.anthropic.com/settings/keys). The dev server runs the `/api/chat` function locally via a Vite middleware, so local development exercises the same code path as production.
 
-## 📱 Browser Compatibility
+### Commands
 
-- **Chrome**: Full support (recommended)
-- **Edge**: Full support
-- **Safari**: Full support
-- **Firefox**: Limited speech recognition support
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Dev server, including the API function |
+| `npm run build` | Production build |
+| `npm test` | Run the test suite |
+| `npm run typecheck` | Type-check app and API |
+| `npm run lint` | Lint |
 
-## 🤝 Contributing
+## Deploying
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Commit your changes: `git commit -m 'Add amazing feature'`
-4. Push to the branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
+Configured for Vercel. Import the repo, then set `ANTHROPIC_API_KEY` as an environment variable in the project settings. `vercel.json` handles the SPA rewrites and leaves `/api/*` to the functions runtime.
 
-## 📄 License
+Deploying without the key is safe — the site runs in demo mode.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Tech
 
-## 🙏 Acknowledgments
+React 18 · TypeScript · Three.js via React Three Fiber · Tailwind · Framer Motion · Vite · Vitest · Anthropic SDK
 
-- Inspired by Tony Stark's JARVIS from Marvel's Iron Man
-- Built with modern web technologies
-- OpenAI for providing the AI capabilities
+## Browser support
 
-## 🐛 Known Issues
+Chrome and Edge are best supported. Speech **recognition** is unavailable in Firefox and the UI disables the mic accordingly — text chat and the 3D scene work everywhere. Voice input requires HTTPS in production.
 
-- Speech recognition may not work in all browsers
-- Requires HTTPS for voice features in production
-- OpenAI API key required for AI responses
+## Known limitations
 
-## 📞 Support
+- Conversation memory is per-browser; clearing site data clears it.
+- The audio-level meter driving the reactor during listening is simulated, not sampled from the mic.
+- Rate limiting is per-instance in memory (see Architecture).
 
-If you encounter any issues or have questions, please open an issue on GitHub.
+## License
 
----
-
-**Note**: This is a demonstration project. For production use, implement proper API key security and user authentication.
+MIT — see [LICENSE](LICENSE).
