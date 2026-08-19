@@ -14,6 +14,7 @@ import {
   ConversationMemoryService,
   ConversationTurn,
 } from './services/ConversationMemoryService';
+import { isWebGLAvailable } from './lib/webgl';
 
 export interface Message {
   id: string;
@@ -160,7 +161,10 @@ function App() {
             ]}
           />
 
-          <p className="etch !text-[#dde4ea]/25">Drag to orbit · Scroll to zoom</p>
+          {/* Only advertise the controls when there is a scene to control. */}
+          {isWebGLAvailable() && (
+            <p className="etch !text-[#dde4ea]/25">Drag to orbit · Scroll to zoom</p>
+          )}
         </div>
       </div>
 
