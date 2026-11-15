@@ -51,7 +51,7 @@ const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
     recognitionRef.current = recognition;
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    recognition.lang = 'pt-BR';
 
     recognition.onresult = (event) => {
       const last = event.results[event.results.length - 1];
