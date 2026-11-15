@@ -33,19 +33,14 @@ export class AssistantService {
         return { text: getDemoResponse(message), demo: true };
       }
 
-      // A rate-limited demo should say so plainly rather than fall back
-      // silently, otherwise the limit looks like the model being evasive.
       if (response.status === 429) {
         const data = (await response.json().catch(() => ({}))) as { message?: string };
         return {
-          text: data.message ?? 'Too many requests just now — give it a moment.',
+          text: data.message ?? 'Muitas mensagens seguidas. Aguarde um instante.',
           demo: true,
         };
       }
 
-      // 503 means the backend has no key configured, which is an expected
-      // state for a public demo. Anything else is a genuine failure, but the
-      // scripted reply still keeps the interface usable.
       return { text: getDemoResponse(message), demo: true };
     } catch {
       return { text: getDemoResponse(message), demo: true };
@@ -156,14 +151,14 @@ export class AssistantService {
   }
 
   private setVoiceForUtterance(utterance: SpeechSynthesisUtterance): void {
+    utterance.lang = 'pt-BR';
     const voices = speechSynthesis.getVoices();
     if (voices.length === 0) return;
 
-    const preferred = ['Daniel', 'Google UK English Male', 'Microsoft David', 'Alex'];
     const match =
-      preferred.map((name) => voices.find((v) => v.name.includes(name))).find(Boolean) ??
-      voices.find((v) => v.lang.startsWith('en-GB')) ??
-      voices.find((v) => v.lang.startsWith('en'));
+      voices.find((v) => v.lang === 'pt-BR' && /male|masculin|antonio|daniel/i.test(v.name)) ??
+      voices.find((v) => v.lang.replace('_', '-').startsWith('pt-BR')) ??
+      voices.find((v) => v.lang.startsWith('pt'));
 
     if (match) utterance.voice = match;
   }
