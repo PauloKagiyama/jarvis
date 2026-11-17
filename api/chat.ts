@@ -1,11 +1,9 @@
-export const config = { runtime: 'edge' };
-
 const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const DEFAULT_MODEL = 'mistralai/mistral-large-4-1t-a52b';
 const TAVILY_URL = 'https://api.tavily.com/search';
 const MAX_TOKENS = 1500;
-const SEARCH_TIMEOUT_MS = 5_000;
-const UPSTREAM_TIMEOUT_MS = 22_000;
+const SEARCH_TIMEOUT_MS = 6_000;
+const UPSTREAM_TIMEOUT_MS = 50_000;
 const MAX_MESSAGE_CHARS = 2000;
 const MAX_HISTORY_TURNS = 10;
 
@@ -48,7 +46,7 @@ async function webSearch(query: string, apiKey: string): Promise<string | null> 
       body: JSON.stringify({
         query: query.slice(0, 400),
         search_depth: 'basic',
-        max_results: 5,
+        max_results: 4,
         include_answer: false,
       }),
     });
@@ -60,7 +58,7 @@ async function webSearch(query: string, apiKey: string): Promise<string | null> 
     const results = (data.results ?? []).filter((r) => r.content);
     if (results.length === 0) return null;
     return results
-      .map((r, i) => `[${i + 1}] ${r.title ?? ''} (${r.url ?? ''})\n${(r.content ?? '').slice(0, 700)}`)
+      .map((r, i) => `[${i + 1}] ${r.title ?? ''} (${r.url ?? ''})\n${(r.content ?? '').slice(0, 500)}`)
       .join('\n\n');
   } catch (error) {
     console.error('Tavily search failed:', error);
@@ -122,11 +120,7 @@ function cleanReply(text: string): string {
     .trim();
 }
 
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== 'POST') {
-    return json({ error: 'Method not allowed' }, 405);
-  }
-
+export async function POST(req: Request): Promise<Response> {
   const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) {
     return json({ error: 'not_configured' }, 503);
