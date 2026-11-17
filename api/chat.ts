@@ -1,8 +1,9 @@
 export const config = { runtime: 'edge' };
 
 const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
-const DEFAULT_MODEL = 'meta/llama-3.3-70b-instruct';
-const MAX_TOKENS = 400;
+const DEFAULT_MODEL = 'mistralai/mistral-large-4-1t-a52b';
+const MAX_TOKENS = 1500;
+const UPSTREAM_TIMEOUT_MS = 22_000;
 const MAX_MESSAGE_CHARS = 2000;
 const MAX_HISTORY_TURNS = 10;
 
@@ -13,6 +14,8 @@ Always reply in the same language the user writes in. If the user writes in Port
 Never use assistant filler. Specifically, never say "How may I assist you today?", "How can I help you?", "Is there anything else I can help you with?", or any variation. Never end a response by offering further help. Answer what was asked and stop.
 
 Be personable and dry-witted when it fits, and stay confident and capable. Keep responses short — two or three sentences unless genuinely more is needed, because your replies are spoken aloud. Do not use markdown, lists or emojis.
+
+Answer directly. Do not show your reasoning or thinking process.
 
 If asked who you are, say you're "JARVIS" (not "J.A.R.V.I.S.").`;
 
@@ -50,7 +53,14 @@ interface HistoryTurn {
 }
 
 interface NvidiaResponse {
-  choices?: { message?: { content?: string | null } }[];
+  choices?: { message?: { content?: string | null }; finish_reason?: string }[];
+}
+
+function cleanReply(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/^[\s\S]*?<\/think>/i, '')
+    .trim();
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -62,7 +72,7 @@ export default async function handler(req: Request): Promise<Response> {
   if (!apiKey) {
     return json({ error: 'not_configured' }, 503);
   }
-  const model = process.env.NVIDIA_MODEL || DEFAULT_MODEL;
+  const model = (process.env.NVIDIA_MODEL || DEFAULT_MODEL).trim();
 
   const ip =
     req.headers.get('x-forwarded-for')?.split(',')[0].trim() ??
@@ -103,9 +113,13 @@ export default async function handler(req: Request): Promise<Response> {
         .map((t) => ({ role: t.role, content: t.content.slice(0, MAX_MESSAGE_CHARS) }))
     : [];
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+
   try {
     const upstream = await fetch(NVIDIA_URL, {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         'content-type': 'application/json',
         accept: 'application/json',
@@ -130,22 +144,44 @@ export default async function handler(req: Request): Promise<Response> {
     }
     if (upstream.status === 401 || upstream.status === 403) {
       console.error('NVIDIA auth failed — check NVIDIA_API_KEY');
-      return json({ error: 'not_configured' }, 503);
+      return problem('A chave da NVIDIA foi recusada. Confira a variável NVIDIA_API_KEY na Vercel.');
+    }
+    if (upstream.status === 404 || upstream.status === 410) {
+      console.error(`NVIDIA model unavailable (${upstream.status}): ${model}`);
+      return problem(
+        `O modelo ${model} não está disponível na NVIDIA. Troque o valor da variável NVIDIA_MODEL na Vercel.`,
+      );
     }
     if (!upstream.ok) {
       const detail = await upstream.text().catch(() => '');
       console.error(`NVIDIA API error ${upstream.status}:`, detail.slice(0, 500));
-      return json({ error: 'upstream_error' }, 502);
+      return problem(`A NVIDIA devolveu o erro ${upstream.status}. Tente de novo em instantes.`);
     }
 
     const data = (await upstream.json()) as NvidiaResponse;
-    const reply = (data.choices?.[0]?.message?.content ?? '').trim();
+    const choice = data.choices?.[0];
+    const reply = cleanReply(choice?.message?.content ?? '');
 
-    return json({ reply: reply || 'Não entendi. Pode repetir?' });
+    if (!reply) {
+      console.error('Empty reply from NVIDIA, finish_reason:', choice?.finish_reason);
+      return problem('Fiquei sem resposta dessa vez. Pode repetir a pergunta?');
+    }
+
+    return json({ reply });
   } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error(`NVIDIA timed out after ${UPSTREAM_TIMEOUT_MS} ms`);
+      return problem('A NVIDIA demorou demais para responder. Tente de novo.');
+    }
     console.error('Unexpected error in /api/chat:', error);
-    return json({ error: 'internal_error' }, 500);
+    return problem('Não consegui falar com a NVIDIA agora. Tente de novo.');
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+function problem(text: string): Response {
+  return json({ reply: text });
 }
 
 function json(payload: unknown, status = 200): Response {
